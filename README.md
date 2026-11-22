@@ -16,8 +16,8 @@ It works in **herdr**, **tmux**, **Orca**, **WezTerm**, and **iTerm2**, on
        alt="A live cost pane — spend, per-model breakdown, burn rate, and a tokens-per-turn sparkline — in a side pane beside a Claude Code session">
 </p>
 
-> **Status:** v0.14.0 — supports herdr (macOS/Linux), tmux (macOS/Linux),
-> Orca (macOS), WezTerm (macOS/Linux), and iTerm2 (macOS). In any other terminal
+> **Status:** v0.15.0 — supports herdr (macOS/Linux), tmux (macOS/Linux),
+> Orca (macOS/Linux), WezTerm (macOS/Linux), and iTerm2 (macOS). In any other terminal
 > the hooks no-op silently, so it's safe to install anywhere.
 
 ## Why
@@ -47,7 +47,7 @@ Three things it gets right that a generic `ccusage session` call does not:
   - **[herdr](https://herdr.dev)** (macOS or Linux) — the pane is a
     `herdr pane split`, inside herdr's own tab.
   - **tmux** (macOS or Linux) — the pane is a `tmux split-window`.
-  - **Orca** (macOS) — the pane is an `orca terminal split`, in the same Orca
+  - **Orca** (macOS or Linux, including a headless `orca serve`) — the pane is an `orca terminal split`, in the same Orca
     tab. Orca splits **50/50 only** (it has no size flag), so `PANE_SIZE` is
     ignored there; the watcher is typed into the new pane with `orca terminal
     send` rather than passed to the split, because `split --command` proved
@@ -86,8 +86,8 @@ Three things it gets right that a generic `ccusage session` call does not:
 | herdr / tmux / Orca / WezTerm / iTerm2 + python3 | Full rich panel (cost, agents, burn rate, sparkline) |
 | Supported terminal, no python3, ccusage present | Plain `ccusage` text fallback, still live |
 | Supported terminal, **neither** | Pane shows the exact, OS-aware fix and becomes a shell so you can run it |
-| **Orca** (macOS) | Full support, except that the split is always 50/50 — `PANE_SIZE` has no effect |
-| herdr, tmux or WezTerm on **Linux** | Full support |
+| **Orca** (macOS or Linux) | Full support, except that the split is always 50/50 — `PANE_SIZE` has no effect |
+| herdr, tmux, Orca or WezTerm on **Linux** | Full support |
 | Any other terminal (plain Terminal.app, kitty, Ghostty, …) | Hooks **no-op silently** (safe to leave installed) |
 
 > **In an unsupported terminal (Terminal.app, VS Code, Ghostty, …)?** Those apps
@@ -149,7 +149,7 @@ Set these as environment variables before launching `claude`:
 | `PANE_SIZE`           | `25`          | Percent of the terminal the monitor pane takes (clamped to 5–90). The main Claude session keeps the rest, so the default is a 3:1 split in Claude's favor. Applies to herdr, tmux, WezTerm and iTerm2. **Ignored on Orca**, which has no size flag and always splits 50/50. |
 | `PANE_BACKEND`        | _(auto)_      | Force a terminal backend: `herdr`, `tmux`, `orca`, `wezterm`, or `iterm`. Unset = auto-detect (herdr → tmux → Orca → WezTerm → iTerm2). `$TMUX` wins over herdr and Orca when both are set, so set this to `herdr` if you run herdr inside tmux. |
 | `PANE_WEZTERM_PERCENT`| `PANE_SIZE`    | WezTerm-only override for the split size (percent of the source pane). Unset, it inherits `PANE_SIZE`. |
-| `PANE_ORCA_BIN`       | _(auto)_      | Path to the `orca` CLI. Unset, the app bundle's copy is used (`/Applications/Orca.app/Contents/Resources/bin/orca`), falling back to `orca` on `PATH` — the bundle first, because the `/usr/local/bin` symlink can be broken. |
+| `PANE_ORCA_BIN`       | _(auto)_      | Path to the `orca` CLI. Unset, the macOS app bundle's copy is used (`/Applications/Orca.app/Contents/Resources/bin/orca`), falling back to `orca` on `PATH` (which is how Linux finds it) — the bundle first, because the `/usr/local/bin` symlink can be broken. |
 | `PANE_ORCA_REFOCUS`   | `1`           | Orca only: after splitting, focus is handed back to the pane Claude is in, so you keep typing where you were. `0` skips that and leaves the new monitor pane active. |
 | `PANE_BLOCKS`         | `1`           | `0` hides the 5h burn-rate/projection section        |
 | `PANE_TABS`           | `1`           | `0` disables the tab strip and arrow-key navigation — a single static panel |
@@ -193,7 +193,8 @@ The weekly cap in particular is invisible to anything that only reads
 transcripts, and it is usually the one that bites.
 
 These come from **Claude Code's own cache** of the server's limit state
-(`~/.claude.json`), read-only. The monitor **never fetches them itself** — that
+(`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set, as
+Orca does for each account), read-only. The monitor **never fetches them itself** — that
 would mean calling Anthropic from a status pane and would break the idle-cost
 promise. It reports how old the cached figure is instead, and marks a percentage
 `~` once it is old enough that it might have moved. The `limits` tab always

@@ -26,6 +26,22 @@ MODEL_ZERO = {"cost": 0.0, "input": 0, "output": 0, "cache_read": 0,
               "cache_creation": 0, "cache_5m": 0, "cache_1h": 0, "turns": 0}
 
 
+def claude_dir():
+    """Claude Code's own directory: $CLAUDE_CONFIG_DIR, else ~/.claude.
+
+    Orca sets $CLAUDE_CONFIG_DIR per account, so ~/.claude can be a different
+    account's. Mirrors pane_claude_dir in common.sh.
+    """
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+
+
+def claude_json():
+    """Claude Code's global config file. It moves INTO $CLAUDE_CONFIG_DIR when
+    that is set; otherwise it sits beside ~/.claude, not inside it."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    return os.path.join(d, ".claude.json") if d else os.path.expanduser("~/.claude.json")
+
+
 def _state_dir():
     d = os.path.join(os.environ.get("XDG_STATE_HOME",
                                     os.path.expanduser("~/.local/state")),
@@ -320,7 +336,7 @@ class Scanner:
         A block starts at the first activity after a gap of >= `hours`, floored
         to the hour, and runs for `hours`. Returns None when nothing is active.
         """
-        root = root or os.path.expanduser("~/.claude/projects")
+        root = root or os.path.join(claude_dir(), "projects")
         now = now or time.time()
         span = hours * 3600
         cutoff = now - span * 2  # only files that could touch the current block
@@ -388,7 +404,7 @@ class Resolver:
 
     def __init__(self, scanner, root=None):
         self.scan = scanner
-        self.root = root or os.path.expanduser("~/.claude/projects")
+        self.root = root or os.path.join(claude_dir(), "projects")
 
     def _all(self):
         return list(_walk_jsonl(self.root))

@@ -102,6 +102,14 @@ pane_state_dir() {
   printf '%s' "$d"
 }
 
+# Claude Code's own directory: projects/, sessions/, stats-cache.json. Honours
+# $CLAUDE_CONFIG_DIR, which moves all of it -- Orca sets it per account, so one
+# machine can hold several, and ~/.claude is then a DIFFERENT account's (or
+# nobody's). Reading ~/.claude there showed that account's limits and plan,
+# priced the 5h block from its transcripts, and judged this session's liveness
+# by its registry, where this session never appears.
+pane_claude_dir() { printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
+
 # Every live pane that belongs to session $1, one per line as
 # "<sid>\t<backend>\t<handle>\t<plugin-root>". Prunes state files whose pane is
 # gone, so crashes and manually-closed panes heal themselves.
@@ -136,7 +144,7 @@ pane_session_list() {  # $1=sid
       printf '%s\t%s\t%s\t%s\n' "$sid" "$be" "$h" "$root"
       continue
     fi
-    tr="$(find -L "$HOME/.claude/projects" -name "$sid.jsonl" 2>/dev/null | head -1)"
+    tr="$(find -L "$(pane_claude_dir)/projects" -name "$sid.jsonl" 2>/dev/null | head -1)"
     if [ -n "$tr" ] && grep -qEm1 "\"teamName\"[[:space:]]*:[[:space:]]*\"session-$t8\"" "$tr" 2>/dev/null; then
       printf '%s\t%s\t%s\t%s\n' "$sid" "$be" "$h" "$root"
     fi
@@ -291,7 +299,7 @@ pane_state_write() {  # $1=path $2=backend $3=handle [$4=plugin root] [$5=owner 
 # session's monitor pane. Nothing this tool does is worth reaching into another
 # session, so it does not guess any more.
 #
-# Claude Code keeps ~/.claude/sessions/<pid>.json for every live session, which
+# Claude Code keeps <claude dir>/sessions/<pid>.json for every live session, which
 # makes the answer exact: walk our own ancestry to the claude process that
 # spawned us and read its id. Absent (older Claude Code), callers fall back to
 # the heuristics as before -- but with pane_is_foreign still standing over
@@ -306,7 +314,7 @@ pane_state_write() {  # $1=path $2=backend $3=handle [$4=plugin root] [$5=owner 
 pane_session_of_pid() {  # $1=pid -> session id | empty
   local pid="$1" f
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  f="$HOME/.claude/sessions/$pid.json"
+  f="$(pane_claude_dir)/sessions/$pid.json"
   [ -f "$f" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   case "$(ps -o comm= -p "$pid" 2>/dev/null)" in
@@ -478,7 +486,10 @@ pane_open() {  # $1=sid  $2=trans  $3=auto|manual
   # the plugin's own location, which under a marketplace cache or a local
   # checkout can contain spaces or glob characters — unquoted, those either split
   # the exec line into a wrong command or expand against the pane's cwd.
-  cmd="$(pane_shq "$watcher") $(pane_shq "$sid") $(pane_shq "$trans") $(pane_shq "$poll") $(pane_shq "$mode")"
+  # The Claude dir goes last, and explicitly: the new pane's environment is the
+  # TERMINAL's, not Claude's (a tmux split takes the server's), so it may carry
+  # another account's $CLAUDE_CONFIG_DIR or none at all.
+  cmd="$(pane_shq "$watcher") $(pane_shq "$sid") $(pane_shq "$trans") $(pane_shq "$poll") $(pane_shq "$mode") $(pane_shq "${CLAUDE_CONFIG_DIR:-}")"
   # $4 is the session id, for backends that can label the pane they create (herdr
   # shows it in its sidebar). The others take three args and ignore it.
   handle="$("pane_open_$backend" "$cmd" "$split" "$size" "$sid")" || return 1
@@ -615,14 +626,16 @@ pane_close_herdr() {  # $1=handle
 }
 
 # ---------------------------------------------------------------------------
-# Backend: Orca  (macOS). A GUI terminal built around coding agents; it injects
+# Backend: Orca  (macOS + Linux). A GUI terminal built around coding agents; it injects
 # $ORCA_TERMINAL_HANDLE into every pane, and that handle IS the pane id here:
 # `term_` followed by a lowercase-hex uuid.
 #
 # Everything goes through the `orca` CLI with --json, which prints
 # {"ok": true, "result": {...}} on success and {"ok": false, "error": {...}} with
 # exit 1 on failure — pretty-printed, one key per line. Measured against Orca
-# 1.4.199; three of its behaviours shape this backend:
+# 1.4.199 on macOS, and 1.4.265 on Linux as a headless `orca serve` (where a
+# live pane also reports "paneRuntimeId": -1, so that field means nothing);
+# three of its behaviours shape this backend:
 #
 #   * The split is ALWAYS 50/50. There is no size, ratio or percent flag, so
 #     PANE_SIZE cannot be honoured here (accepted and ignored; documented).
@@ -964,7 +977,7 @@ pane_close_recorded() {  # $1=state file -> 0 when the pane is gone
 # THAT IS OTHERWISE IN USE means the session is over.
 pane_session_is_live() {  # $1=sid
   local want="$1" dir found pid
-  dir="$HOME/.claude/sessions"
+  dir="$(pane_claude_dir)/sessions"
   [ -d "$dir" ] || return 2
   ls "$dir"/*.json >/dev/null 2>&1 || return 2
   found="$(grep -lE "\"sessionId\"[[:space:]]*:[[:space:]]*\"$want\"" \

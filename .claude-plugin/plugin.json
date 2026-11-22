@@ -1,7 +1,7 @@
 {
   "name": "pane",
   "description": "Live side-pane usage monitor for Claude Code (herdr, tmux, Orca, WezTerm, iTerm2): accurate per-model cost, subagent spend, and 5h burn rate, read straight from the session transcripts.",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "author": {
     "name": "Kartavya Kothari",
     "url": "https://github.com/thekoalaperson"

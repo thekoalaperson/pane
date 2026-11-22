@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Live, change-driven usage readout for one Claude Code session.
-# Usage: watch.sh <session-id> [transcript-path] [poll-seconds]
+# Usage: watch.sh <session-id> [transcript-path] [poll-seconds] [auto|manual]
+#                 [claude-config-dir]
 #
 # Cheaply stats this session's transcript every <poll> seconds and only runs
 # when the file actually changed -> near-live but idle-cheap.
@@ -14,6 +15,12 @@ sid="$1"
 transcript="$2"
 poll="${3:-3}"
 mode="${4:-manual}"   # 'auto' = opened by the SessionStart hook
+# The $CLAUDE_CONFIG_DIR the hook ran under, empty meaning ~/.claude. Taken from
+# the hook rather than this pane's environment, which is the terminal's and can
+# belong to another account. Absent (a hand-run watcher) leaves the env alone.
+if [ "$#" -ge 5 ]; then
+  if [ -n "$5" ]; then export CLAUDE_CONFIG_DIR="$5"; else unset CLAUDE_CONFIG_DIR; fi
+fi
 case "$poll" in ''|*[!0-9]*) poll=3 ;; esac
 [ "$poll" -lt 1 ] && poll=1
 py="$(pane_python)"
@@ -122,7 +129,7 @@ shell_out() { screen_leave; pane_exec_shell; }
 
 locate() {
   if [ -n "$transcript" ] && [ -f "$transcript" ]; then return; fi
-  transcript="$(find -L "$HOME/.claude/projects" -name "$sid.jsonl" 2>/dev/null | head -1)"
+  transcript="$(find -L "$(pane_claude_dir)/projects" -name "$sid.jsonl" 2>/dev/null | head -1)"
 }
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,38 @@ All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); this
 project uses [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] - 2026-11-22
+
+### Fixed
+- **`$CLAUDE_CONFIG_DIR` is honoured.** Everything Claude Code keeps (projects,
+  the live-session registry, `.claude.json`, `stats-cache.json`) was read from
+  `~/.claude`. Orca runs each Claude account under its own
+  `$CLAUDE_CONFIG_DIR`, where `~/.claude` is a different account's, so:
+  - the limits and account tabs showed that account's plan and limits, or "no
+    cached limit data" beside a session that had both;
+  - the session registry was the wrong one, so the owner of a pane could not be
+    found, and as soon as the default account ran any session the watcher would
+    have read this one as ended and retired its own pane within minutes.
+
+  The hook passes its `$CLAUDE_CONFIG_DIR` to the watcher as an argument, because
+  the pane's environment is the terminal's and may carry another account's.
+
+### Changed
+- **Orca on Linux is supported**, measured on Orca 1.4.265 running as a headless
+  `orca serve`: the split opens, draws, takes keys, and closes on SessionEnd,
+  and a closed handle reads `connected: false`, so the guard against closing a
+  neighbour holds.
+
+### Tests
+- The watcher tests ran `/bin/sh watch.sh`. That is bash on macOS and dash on
+  Debian and Ubuntu, where `read -rsn1 -t` fails at once: seven key tests failed
+  there, and the watcher spun. They now run the script by path, as every backend
+  does.
+- The two "does not spin" tests missed that spin, because they read the
+  parent's CPU from `ps`, which on Linux prints whole seconds and leaves out the
+  forked `stat`s where a spinning loop spends its time (0.5s own, 3.6s children,
+  in 4s). They now count reaped children too.
+
 ## [0.14.0] - 2026-10-29
 
 ### Changed
