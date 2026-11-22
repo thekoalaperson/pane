@@ -7,6 +7,9 @@ Two files, both written by Claude Code itself:
                               cachedUsageUtilization (server-side limit state)
   ~/.claude/stats-cache.json  account-wide daily history, recomputed once a day
 
+Both move under $CLAUDE_CONFIG_DIR when it is set (see usage.claude_dir), which
+is how Orca keeps one account apart from another on the same machine.
+
 Why this is worth reading at all: on a subscription the dollar figures the panel
 computes are notional — you do not pay them. What actually stops you mid-task is
 the *percentage of your rate limit*, and the weekly window in particular is
@@ -30,6 +33,8 @@ default identity is a first name only. `PANE_ACCOUNT=full` opts into the email
 and organisation name; `PANE_ACCOUNT=0` turns the whole thing off.
 """
 import json, os, re, time
+
+from usage import claude_dir, claude_json
 
 # The percentage bands the panel colours on. `severity` from the server wins
 # when present; these are the fallback for an older client that omits it.
@@ -113,8 +118,7 @@ class Account:
     raising, so a caller can treat the whole module as optional.
     """
 
-    def __init__(self, home=None, now=None):
-        self.home = home or os.path.expanduser("~")
+    def __init__(self, now=None):
         self._now = now
         self._conf = None
         self._stats = None
@@ -128,14 +132,14 @@ class Account:
     def _config(self):
         if not self._loaded_conf:
             self._loaded_conf = True
-            self._conf = _read_json(os.path.join(self.home, ".claude.json"))
+            self._conf = _read_json(claude_json())
         return self._conf if isinstance(self._conf, dict) else None
 
     def _stats_file(self):
         if not self._loaded_stats:
             self._loaded_stats = True
             self._stats = _read_json(
-                os.path.join(self.home, ".claude", "stats-cache.json"))
+                os.path.join(claude_dir(), "stats-cache.json"))
         return self._stats if isinstance(self._stats, dict) else None
 
     # -- identity -----------------------------------------------------------

@@ -45,11 +45,11 @@ fi
 # skipping transcripts that live under a subagents/ directory.
 if [ -z "$trans" ]; then
   if [ -n "$sid" ]; then
-    trans="$(find "$HOME/.claude/projects" -name "$sid.jsonl" 2>/dev/null | head -1)"
+    trans="$(find "$(pane_claude_dir)/projects" -name "$sid.jsonl" 2>/dev/null | head -1)"
   else
-    proj="$HOME/.claude/projects/$(printf '%s' "$PWD" | sed 's#[/.]#-#g')"
+    proj="$(pane_claude_dir)/projects/$(printf '%s' "$PWD" | sed 's#[/.]#-#g')"
     newest="$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1)"
-    [ -z "$newest" ] && newest="$(ls -t "$HOME"/.claude/projects/*/*.jsonl 2>/dev/null | head -1)"
+    [ -z "$newest" ] && newest="$(ls -t "$(pane_claude_dir)"/projects/*/*.jsonl 2>/dev/null | head -1)"
     trans="$newest"
     [ -n "$newest" ] && sid="$(basename "$newest" .jsonl)"
   fi
@@ -68,6 +68,6 @@ case $? in
   3) echo "◻️  Closed pane for session ${sid:0:8}. Run it again to reopen." ;;
   5) echo "⏭️  Left session ${sid:0:8}'s monitor alone — that session belongs to another running Claude process, not this one." ;;
   4) echo "🔄 Restarted pane for session ${sid:0:8} on v$(pane_plugin_version) (replaced a pane that was stale or duplicated)." ;;
-  *) echo "Could not open the pane (backend: $(pane_backend)). On iTerm2, check Automation permission; on herdr, that its server is running (\`herdr status\`); on Orca, that its CLI answers: \`/Applications/Orca.app/Contents/Resources/bin/orca terminal list\`." ;;
+  *) echo "Could not open the pane (backend: $(pane_backend)). On iTerm2, check Automation permission; on herdr, that its server is running (\`herdr status\`); on Orca, that its CLI answers: \`$(pane_orca_bin) terminal list\`." ;;
 esac
 exit 0

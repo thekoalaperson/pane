@@ -35,7 +35,7 @@ import sys, os, re, glob, shutil, time, unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pricing import Pricing            # noqa: E402
-from usage import Scanner              # noqa: E402
+from usage import Scanner, claude_dir  # noqa: E402
 import account as acct                 # noqa: E402
 
 sid = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -366,7 +366,7 @@ def bar_row(label, frac, value, tail, col, out, indent="  ", lw=6):
 def locate(sid, transcript):
     if transcript and os.path.exists(transcript):
         return transcript
-    hits = glob.glob(os.path.expanduser("~/.claude/projects/*/%s.jsonl" % sid))
+    hits = glob.glob(os.path.join(glob.escape(claude_dir()), "projects", "*", sid + ".jsonl"))
     return hits[0] if hits else ""
 
 

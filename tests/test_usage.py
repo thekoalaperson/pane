@@ -14,6 +14,10 @@ LIB = os.path.join(HERE, "..", "lib")
 sys.path.insert(0, LIB)
 
 os.environ["PANE_NO_NETWORK"] = "1"   # tests must never hit the network
+# Claude Code's directory follows $CLAUDE_CONFIG_DIR, which Orca sets in every
+# pane. Left in place it points the sandboxed suite at the developer's real
+# account, so it goes; tests that need it set it themselves.
+os.environ.pop("CLAUDE_CONFIG_DIR", None)
 
 from pricing import Pricing          # noqa: E402
 import usage as usage_mod            # noqa: E402
@@ -60,6 +64,7 @@ class Base(unittest.TestCase):
     def tearDown(self):
         if self._home is not None:
             os.environ["HOME"] = self._home
+        os.environ.pop("CLAUDE_CONFIG_DIR", None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     # -- account fixtures ---------------------------------------------------
@@ -790,6 +795,24 @@ pane_session_is_live "long-gone-session"; echo "gone=$?"
 ''', home=self.tmp)
         self.assertIn("live=0", out, r.stderr)
         self.assertIn("gone=1", out, r.stderr)
+
+    def test_the_registry_follows_claude_config_dir(self):
+        """~/.claude/sessions belongs to the default account. Under another
+        account's $CLAUDE_CONFIG_DIR this session is never listed there, so
+        reading it would retire a live pane three checks in, as soon as the
+        default account had any session running at all."""
+        out, r = self._sh(self.NEIGHBOUR + '''
+export CLAUDE_CONFIG_DIR="$HOME/orca profile"
+mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
+printf '{"pid":4243,"sessionId":"this-account"}' \\
+  > "$CLAUDE_CONFIG_DIR/sessions/4243.json"
+pane_session_is_live "this-account"; echo "mine=$?"
+pane_session_is_live "neighbour-session"; echo "other=$?"
+echo "sid=$(pane_session_of_pid 4243)"
+''', home=self.tmp)
+        self.assertIn("mine=0", out, r.stderr)
+        self.assertIn("other=1", out, r.stderr)
+        self.assertIn("sid=this-account", out, r.stderr)
 
     def test_the_owning_session_is_read_from_the_process_tree(self):
         """Which session is this? Asked of Claude Code, never inferred.
@@ -1676,6 +1699,21 @@ cat "$(pane_state_dir)/sess-1.pane"
         self.assertIn("[exec '%s/lib/../bin/watch.sh' 'spacey' '/tmp/t.jsonl'"
                       % root, send[0])
 
+    def test_the_claude_dir_is_handed_to_the_watcher(self):
+        """The new pane's env is the terminal's, not Claude's, so the hook's
+        $CLAUDE_CONFIG_DIR travels as the watcher's last argument; empty when
+        unset, which tells the watcher to drop whatever the pane inherited."""
+        for sid, cfg, want in (("s1", "/cfg/acct one", "'/cfg/acct one'"),
+                               ("s2", None, "''")):
+            open(self.log, "w").close()
+            out, r = self._sh('pane_open %s /tmp/t.jsonl auto; echo "rc=$?"' % sid,
+                              CLAUDE_CONFIG_DIR=cfg, **self._in_orca())
+            self.assertIn("rc=0", out, r.stderr)
+            send = [l for l in self._log().splitlines()
+                    if l.startswith("[terminal][send]")]
+            self.assertEqual(len(send), 1, self._log())
+            self.assertIn("'/tmp/t.jsonl' '3' 'auto' %s]" % want, send[0])
+
     def test_the_session_end_close_path_speaks_orca(self):
         """SessionEnd is a fresh process: it closes via the RECORDED backend, and
         that close still goes through the liveness guard."""
@@ -1871,7 +1909,7 @@ class TestAccount(Base):
     def _acct(self, **kw):
         import account
         self.write_account(**kw)
-        return account.Account(home=os.environ["HOME"])
+        return account.Account()
 
     def test_plan_label_carries_the_multiplier(self):
         import account
@@ -1890,16 +1928,40 @@ class TestAccount(Base):
 
     def test_missing_file_is_not_an_error(self):
         import account
-        a = account.Account(home=os.path.join(self.tmp, "nope"))
+        os.environ["HOME"] = os.path.join(self.tmp, "nope")
+        a = account.Account()
         self.assertIsNone(a.identity())
         self.assertIsNone(a.limits())
         self.assertIsNone(a.history())
+
+    def test_the_account_follows_claude_config_dir(self):
+        """Orca runs each Claude account under its own $CLAUDE_CONFIG_DIR, and
+        ~/.claude.json is then another account's. Reading it showed that
+        account's plan, or none, and "no cached limit data" beside a live
+        session that had both. Both files move into the config dir."""
+        import account
+        self.write_account(oauth={"displayName": "Other Account"})
+        cfg = os.path.join(self.tmp, "orca profile")
+        os.makedirs(cfg)
+        with open(os.path.join(cfg, ".claude.json"), "w") as f:
+            json.dump({"oauthAccount": {"displayName": "This Account"},
+                       "cachedUsageUtilization": {
+                           "fetchedAtMs": int(time.time() * 1000),
+                           "utilization": {"limits": [
+                               self.limit_row("session", "session", 40)]}}}, f)
+        with open(os.path.join(cfg, "stats-cache.json"), "w") as f:
+            json.dump({"version": 1}, f)
+        os.environ["CLAUDE_CONFIG_DIR"] = cfg
+        a = account.Account()
+        self.assertEqual(a.identity()["name"], "This Account")
+        self.assertEqual(a.limits()["session"]["percent"], 40)
+        self.assertEqual(a._stats_file(), {"version": 1})
 
     def test_corrupt_file_is_not_an_error(self):
         import account
         with open(os.path.join(os.environ["HOME"], ".claude.json"), "w") as f:
             f.write("{not json at all")
-        a = account.Account(home=os.environ["HOME"])
+        a = account.Account()
         self.assertIsNone(a.identity())
         self.assertIsNone(a.limits())
 
@@ -1909,7 +1971,7 @@ class TestAccount(Base):
         with open(os.path.join(os.environ["HOME"], ".claude.json"), "w") as f:
             json.dump({"oauthAccount": "not-a-dict",
                        "cachedUsageUtilization": {"utilization": [1, 2, 3]}}, f)
-        a = account.Account(home=os.environ["HOME"])
+        a = account.Account()
         self.assertIsNone(a.identity())
         self.assertIsNone(a.limits())
 
@@ -1950,7 +2012,7 @@ class TestAccount(Base):
                                           "resets_at": "2026-08-04T10:20:00+00:00"}}}}
         with open(os.path.join(os.environ["HOME"], ".claude.json"), "w") as f:
             json.dump(conf, f)
-        lim = account.Account(home=os.environ["HOME"]).limits()
+        lim = account.Account().limits()
         self.assertEqual(round(lim["session"]["percent"]), 42)
 
     def test_email_and_org_are_withheld_by_default(self):
@@ -2207,9 +2269,23 @@ class TestTabs(Base):
 
 
 def _cpu_seconds(pid):
-    """CPU seconds a process has used, via `ps`. None if it can't be read."""
+    """CPU seconds a process and its reaped children have used. None if unknown.
+
+    Children count because the watcher's work IS children: a loop that spins
+    forks `stat` on every pass and its own time barely moves. Measured on Linux,
+    a spinning watcher used 0.5s itself and 3.6s in children over 4s. Linux `ps`
+    also prints whole seconds only, so `ps` alone read that as 0.
+    """
     try:
-        out = subprocess.run(["ps", "-o", "time=", "-p", str(pid)],
+        with open("/proc/%d/stat" % pid) as f:
+            fields = f.read().rsplit(")", 1)[1].split()
+        # utime stime cutime cstime: fields 14-17, here 11-14 after pid/comm.
+        return sum(int(x) for x in fields[11:15]) / os.sysconf("SC_CLK_TCK")
+    except (OSError, IndexError, ValueError):
+        pass
+    try:
+        # BSD/macOS: -S folds exited children into the parent's time.
+        out = subprocess.run(["ps", "-S", "-o", "time=", "-p", str(pid)],
                              capture_output=True, text=True, timeout=10).stdout.strip()
     except Exception:
         return None
@@ -2303,7 +2379,8 @@ class TestWatchKeys(unittest.TestCase):
                   "XDG_CONFIG_HOME": os.path.join(self.tmp, "config")})
         return e
 
-    def _drive(self, keys, settle=1.2, env=None, script=None, mutate=None):
+    def _drive(self, keys, settle=1.2, env=None, script=None, mutate=None,
+               args=None):
         """Run the watcher on a pty, send `keys`, return everything it drew."""
         import pty, select, signal, fcntl, termios, struct
         pid, fd = pty.fork()
@@ -2311,8 +2388,11 @@ class TestWatchKeys(unittest.TestCase):
             os.environ.update(self._env())
             os.environ.update(env or {})
             try:
-                os.execv("/bin/sh", ["sh", script or self.watch,
-                                     self.sid, self.path, "1"])
+                # By path, so its shebang picks the shell -- which is how
+                # every backend runs it. `sh watch.sh` is a different program
+                # wherever /bin/sh is not bash (dash on Debian and Ubuntu).
+                prog = script or self.watch
+                os.execv(prog, [prog] + list(args or (self.sid, self.path, "1")))
             finally:
                 os._exit(1)
         fcntl.ioctl(fd, termios.TIOCSWINSZ,
@@ -2353,6 +2433,19 @@ class TestWatchKeys(unittest.TestCase):
         """tmux and some terminals send ESC O C instead of ESC [ C."""
         out = self._drive([b"\033OC"])
         self.assertIn("RATE LIMITS", out)
+
+    def test_the_watcher_reads_the_claude_dir_it_was_handed(self):
+        """No transcript path, a stale $CLAUDE_CONFIG_DIR inherited from the
+        terminal, and the session only under the dir the hook passed: the
+        watcher must find it there rather than wait forever."""
+        cfg = os.path.join(self.tmp, "orca profile")
+        sid = "fed12345-0000-0000-0000-000000000000"
+        write(os.path.join(cfg, "projects", "p", sid + ".jsonl"),
+              [msg("claude-opus-5", "m1", out=1_000_000)])
+        out = self._drive([], args=(sid, "", "1", "manual", cfg),
+                          env={"CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "stale")})
+        self.assertNotIn("waiting for session", out)
+        self.assertIn("MODELS", out)
 
     def test_number_key_jumps(self):
         # Tab 4 is `agents`, and this fixture has none -- so that body's text
@@ -2532,7 +2625,7 @@ class TestWatchKeys(unittest.TestCase):
         e = self._env()
         # stdout to /dev/null, not a pipe: an undrained pipe would fill and block
         # the watcher, which would make "it used no CPU" true for the wrong reason.
-        p = subprocess.Popen(["/bin/sh", self.watch, self.sid, self.path, "1"],
+        p = subprocess.Popen([self.watch, self.sid, self.path, "1"],
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, env=e)
         try:
@@ -2557,7 +2650,7 @@ class TestWatchKeys(unittest.TestCase):
         if pid == 0:
             os.environ.update(self._env())
             try:
-                os.execv("/bin/sh", ["sh", self.watch, self.sid, self.path, "1"])
+                os.execv(self.watch, [self.watch, self.sid, self.path, "1"])
             finally:
                 os._exit(1)
         try:
